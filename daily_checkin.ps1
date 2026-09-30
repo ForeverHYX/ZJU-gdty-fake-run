@@ -1,44 +1,48 @@
-# Windows 版每日自动打卡: 防重 -> 随机延时 -> 必要时续期 -> 提交
-# 用法: powershell -ExecutionPolicy Bypass -File daily_checkin.ps1
-# 建议任务计划程序每天定时触发(见 README)
-$ErrorActionPreference = "Continue"
+# Windows daily entry: refresh token, check existing records, wait, then submit.
+$ErrorActionPreference = 'Stop'
 $Dir = $PSScriptRoot
 Set-Location $Dir
-Start-Transcript -Path ("daily_{0}.log" -f (Get-Date -Format yyyyMMdd)) -Append
-Write-Host "===== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') 自动打卡启动 ====="
 
-# 定位 python
-$py = if (Get-Command python -ErrorAction SilentlyContinue) { "python" }
-      elseif (Get-Command py -ErrorAction SilentlyContinue) { "py -3" }
-      else { $null }
-if (-not $py) { Write-Host "[X] 未找到 python"; Stop-Transcript; exit 1 }
-
-# 0) 防重
-$done = Invoke-Expression "$py check_status.py dedup"
-if ($done -eq "YES") {
-    Write-Host "[=] 今日已有>=3km完成记录, 跳过本次打卡"
-    Stop-Transcript; exit 0
+$python = Get-Command python -ErrorAction SilentlyContinue
+$pyPrefix = @()
+if (-not $python) {
+    $python = Get-Command py -ErrorAction SilentlyContinue
+    $pyPrefix = @('-3')
 }
+if (-not $python) { throw 'Python 3 was not found' }
+$pyExe = $python.Source
 
-# 1) 随机延时 60~2159 秒
-$delay = Get-Random -Minimum 60 -Maximum 2160
-Write-Host "[*] 随机延时 ${delay}s"
-Start-Sleep -Seconds $delay
+Start-Transcript -Path (Join-Path $Dir ("daily_{0}.log" -f (Get-Date -Format yyyyMMdd))) -Append
+try {
+    $remaining = & $pyExe @pyPrefix check_status.py remaining
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read token expiry' }
+    $remaining = [int]$remaining
+    if ($remaining -lt 7200) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir 'refresh.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Token refresh failed' }
+        $remaining = & $pyExe @pyPrefix check_status.py remaining
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read refreshed token expiry' }
+        $remaining = [int]$remaining
+    }
+    if ($remaining -lt 7200) { throw 'Token has less than two hours remaining' }
 
-# 2) token 剩余不足1小时则续期
-$rem = [int](Invoke-Expression "$py check_status.py remaining")
-Write-Host "[*] token 剩余 ${rem}s"
-if ($rem -lt 3600) {
-    & powershell -ExecutionPolicy Bypass -File "$Dir\refresh.ps1"
-    $rem = [int](Invoke-Expression "$py check_status.py remaining")
+    $done = & $pyExe @pyPrefix check_status.py dedup
+    if ($LASTEXITCODE -ne 0) { throw 'Could not query existing records' }
+    if ($done -eq 'YES') {
+        Write-Host 'A qualifying record already exists today; skipping.'
+    } elseif ($done -ne 'NO') {
+        throw 'Cannot determine whether a qualifying record already exists'
+    } else {
+        $delay = Get-Random -Minimum 60 -Maximum 2160
+        Write-Host "Waiting $delay seconds before submission."
+        Start-Sleep -Seconds $delay
+        $remaining = & $pyExe @pyPrefix check_status.py remaining
+        if ($LASTEXITCODE -ne 0 -or [int]$remaining -lt 1500) {
+            throw 'Token validity is too short for submission'
+        }
+        & $pyExe @pyPrefix -u forge2.py
+        if ($LASTEXITCODE -ne 0) { throw "Submission failed with exit code $LASTEXITCODE" }
+    }
+} finally {
+    Stop-Transcript
 }
-if ($rem -lt 1500) {
-    Write-Host "[!] token 剩余不足, 中止。请打开一次企业咕咚小程序后重跑 refresh.ps1"
-    Stop-Transcript; exit 2
-}
-
-# 3) 提交(约17分钟)
-Write-Host "[*] 开始提交 $(Get-Date -Format HH:mm:ss)"
-& $py -u forge2.py
-Write-Host "===== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') 完成 ====="
-Stop-Transcript

@@ -35,7 +35,7 @@ POST /v1/route/create_route_image_url -> 挂载轨迹图
 | `token_grab.py` | mitmproxy 插件，自动截获 auth/login 保存 token |
 | `refresh.sh` | 一键续期：开代理→等小程序打开→抓 token→关代理 |
 | `daily_checkin.sh` / `daily_checkin.ps1` | 每日入口（bash / PowerShell）：防重→随机延时→必要时续期→提交 |
-| `refresh.ps1` | Windows 版 token 续期（双栈代理开关） |
+| `refresh.ps1` | Windows 版 token 续期（临时代理并恢复原设置） |
 | `check_status.py` | 跨平台状态查询（防重/ token 剩余），调度脚本共用 |
 | `unpack.js` | wxapkg 解包器（研究协议用） |
 | `route_template.json` | 校内道路折线模板（217 点/3018m，可替换） |
@@ -121,11 +121,11 @@ Windows 版入口：`refresh.ps1`（续期）与 `daily_checkin.ps1`（每日打
 pip install mitmproxy pillow
 ```
 
-### 证书（管理员，一次性）
+### 证书（当前用户，一次性）
 
 先生成 CA（运行一次 refresh.ps1 失败退出即可生成 `mitmca\`），然后：
 ```powershell
-certutil -addstore -f ROOT mitmca\mitmproxy-ca-cert.cer
+certutil -user -addstore -f ROOT mitmca\mitmproxy-ca-cert.cer
 ```
 
 ### 抓首次 token / 续期
@@ -133,7 +133,7 @@ certutil -addstore -f ROOT mitmca\mitmproxy-ca-cert.cer
 ```powershell
 powershell -ExecutionPolicy Bypass -File refresh.ps1
 ```
-脚本会开双栈代理（WinINET 注册表 + winhttp），提示时**在 Windows 微信打开一次企业咕咚小程序**，捕获后自动关代理。
+脚本会临时修改当前用户的 WinINET 代理，提示时**在 Windows 微信打开一次企业咕咚小程序**。无论成功、超时还是出错，脚本都会恢复原代理设置；不会修改 WinHTTP 代理。运行前请确认允许该临时切换。
 
 ### 每日自动化（任务计划程序）
 

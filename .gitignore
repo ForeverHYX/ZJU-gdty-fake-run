@@ -3,6 +3,7 @@ token.fresh
 config.json
 mitmca/
 mitm_refresh.log
+mitm_refresh.err.log
 flows*.mitm
 capture_dump.txt
 daily_*.log

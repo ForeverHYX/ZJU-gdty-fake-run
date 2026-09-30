@@ -3,7 +3,7 @@
 用法: python3 -u forge2.py [--dry]
 依赖: config.json(从 config.example.json 复制填写), token.txt, route_template.json
 """
-import urllib.request, urllib.parse, json, gzip, time, random, math, sys, subprocess, os
+import urllib.request, urllib.parse, json, gzip, time, random, math, sys, subprocess, os, tempfile
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(DIR, "config.json")))
@@ -148,15 +148,24 @@ def run():
         print(f"complete#{attempt} ->", comp, flush=True)
         if comp.get("route_id") not in (0, None, ""):
             print(f"[OK] 记录ID {comp['route_id']}, {i}点 {cum:.0f}m {sim/60:.1f}min 步数{steps}", flush=True)
-            json.dump([{"latitude": p["latitude"], "longitude": p["longitude"]} for p in all_pts],
-                      open(f"/tmp/points_{rid[:8]}.json", "w"))
+            points_path = os.path.join(tempfile.gettempdir(), f"points_{rid[:8]}.json")
+            with open(points_path, "w") as f:
+                json.dump([{"latitude": p["latitude"], "longitude": p["longitude"]} for p in all_pts], f)
             try:
-                subprocess.run([sys.executable, os.path.join(DIR, "route_img.py"), rid,
-                                f"/tmp/points_{rid[:8]}.json", f"{cum/1000:.2f}", f"{sim/60:.1f}"],
-                               timeout=300, capture_output=True)
-                print("[OK] 轨迹图已生成并挂到记录", flush=True)
+                result = subprocess.run([sys.executable, os.path.join(DIR, "route_img.py"), rid,
+                                         points_path, f"{cum/1000:.2f}", f"{sim/60:.1f}"],
+                                        timeout=300, capture_output=True, text=True)
+                if result.returncode == 0:
+                    print("[OK] 轨迹图已生成并挂到记录", flush=True)
+                else:
+                    print("[!] 挂图失败:", result.stderr[-500:], flush=True)
             except Exception as e:
                 print("[!] 挂图失败:", e, flush=True)
+            finally:
+                try:
+                    os.remove(points_path)
+                except OSError:
+                    pass
             break
         time.sleep(5)
     else:
