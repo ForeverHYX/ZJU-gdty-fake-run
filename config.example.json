@@ -1,0 +1,10 @@
+{
+  "user_id": "在这里填你的咕咚用户UUID(抓包 auth/login 响应的 token.uuid 或所有请求 platform_user_id)",
+  "club_id": 48472,
+  "appid": "wx2961574bbec73239",
+  "wechat_applet_storage": "~/Library/Containers/com.tencent.xinWeChat/Data/Documents/app_data/radium/users/<你的微信内部哈希>/applet/local/<小程序appid>",
+  "target_m": 3300,
+  "base_pace": 300,
+  "device_info": "apple iPhone14,2 iOS 18.3.2 8.0.59 3.17.2 电量87",
+  "brand": "apple@@@iPhone14,2@@@iOS 18.3.2@@@8.0.59@@@3.17.2"
+}

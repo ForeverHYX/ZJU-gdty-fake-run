@@ -1,0 +1,10 @@
+token.txt
+token.fresh
+config.json
+mitmca/
+mitm_refresh.log
+flows*.mitm
+capture_dump.txt
+daily_*.log
+*.pyc
+__pycache__
