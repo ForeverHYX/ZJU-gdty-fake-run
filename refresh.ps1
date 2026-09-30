@@ -1,56 +1,53 @@
-# Windows 版 token 续期: 开代理 -> 等用户打开小程序 -> 抓新 token -> 关代理
-# 用法: powershell -ExecutionPolicy Bypass -File refresh.ps1
-# 前提: mitmproxy(pip install mitmproxy) + CA 已导入信任(管理员执行一次):
-#   certutil -addstore -f ROOT mitmca\mitmproxy-ca-cert.cer
-$ErrorActionPreference = "Continue"
+# Windows token refresh: temporarily proxy WeChat, then restore the user's proxy.
+$ErrorActionPreference = 'Stop'
 $Dir = $PSScriptRoot
-Set-Location $Dir
+$reg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+$previous = Get-ItemProperty -Path $reg
+$hadServer = $previous.PSObject.Properties.Name -contains 'ProxyServer'
+$hadEnable = $previous.PSObject.Properties.Name -contains 'ProxyEnable'
+$mitmdump = (Get-Command mitmdump -ErrorAction Stop).Source
+$process = $null
+$proxyChanged = $false
+$captured = $false
 
-function Enable-Proxy {
-    $reg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
-    Set-ItemProperty $reg -Name ProxyServer -Value '127.0.0.1:8080'
-    Set-ItemProperty $reg -Name ProxyEnable -Value 1
-    netsh winhttp set proxy 127.0.0.1:8080 | Out-Null
-}
-function Disable-Proxy {
-    $reg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
-    Set-ItemProperty $reg -Name ProxyEnable -Value 0
-    netsh winhttp reset proxy | Out-Null
+try {
+    Remove-Item -LiteralPath (Join-Path $Dir 'token.fresh') -ErrorAction SilentlyContinue
+    $process = Start-Process -FilePath $mitmdump -WindowStyle Hidden -PassThru -ArgumentList @(
+        '-s', (Join-Path $Dir 'token_grab.py'),
+        '--listen-port', '8080',
+        '--set', "confdir=$Dir\mitmca",
+        '--set', 'block_global=false',
+        '--allow-hosts', 'codoon|igofit'
+    ) -RedirectStandardOutput (Join-Path $Dir 'mitm_refresh.log') -RedirectStandardError (Join-Path $Dir 'mitm_refresh.err.log')
+    Start-Sleep -Seconds 4
+    if ($process.HasExited) { throw 'mitmdump failed to start; see mitm_refresh.err.log' }
+
+    $proxyChanged = $true
+    Set-ItemProperty -Path $reg -Name ProxyServer -Value '127.0.0.1:8080'
+    Set-ItemProperty -Path $reg -Name ProxyEnable -Value 1
+    Write-Host 'Proxy is active. Open the enterprise Codoon mini program in WeChat.'
+    for ($i = 0; $i -lt 120; $i++) {
+        if (Test-Path (Join-Path $Dir 'token.fresh')) { $captured = $true; break }
+        if ($process.HasExited) { throw 'mitmdump exited before a token was captured' }
+        Start-Sleep -Seconds 1
+    }
+} finally {
+    try {
+        if ($proxyChanged) {
+            if ($hadServer) { Set-ItemProperty -Path $reg -Name ProxyServer -Value $previous.ProxyServer }
+            else { Remove-ItemProperty -Path $reg -Name ProxyServer -ErrorAction SilentlyContinue }
+            if ($hadEnable) { Set-ItemProperty -Path $reg -Name ProxyEnable -Value $previous.ProxyEnable }
+            else { Remove-ItemProperty -Path $reg -Name ProxyEnable -ErrorAction SilentlyContinue }
+        }
+    } finally {
+        if ($process -and -not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+        if ($captured) {
+            Remove-Item -LiteralPath (Join-Path $Dir 'token.fresh') -ErrorAction SilentlyContinue
+        }
+    }
 }
 
-Remove-Item "$Dir\token.fresh" -ErrorAction SilentlyContinue
-Get-Process mitmdump -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep 1
-
-$p = Start-Process -NoNewWindow -PassThru mitmdump -ArgumentList @(
-    '-s', "$Dir\token_grab.py",
-    '--listen-port', '8080',
-    '--set', "confdir=$Dir\mitmca",
-    '--set', 'block_global=false',
-    '--allow-hosts', 'codoon|igofit'
-) -RedirectStandardOutput "$Dir\mitm_refresh.log" -RedirectStandardError "$Dir\mitm_refresh.err.log"
-Start-Sleep 4
-if ($p.HasExited) {
-    Write-Host "[X] mitmdump 启动失败, 看mitm_refresh.err.log" -ForegroundColor Red
-    exit 1
-}
-Enable-Proxy
-Write-Host "[*] 代理已开(只截获 *.codoon.com, 其他直通)。请打开一次【企业咕咚】小程序, 等首页加载..." -ForegroundColor Yellow
-
-$ok = $false
-for ($i = 0; $i -lt 120; $i++) {
-    if (Test-Path "$Dir\token.fresh") { $ok = $true; break }
-    Start-Sleep 1
-}
-Disable-Proxy
-Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-Get-Process mitmdump -ErrorAction SilentlyContinue | Stop-Process -Force
-
-if ($ok) {
-    Remove-Item "$Dir\token.fresh" -ErrorAction SilentlyContinue
-    Write-Host "[OK] token 续期完成(25小时有效), 代理已关闭" -ForegroundColor Green
-    exit 0
-} else {
-    Write-Host "[X] 120秒内没抓到登录——确认小程序已打开且旧token已过期(没过期不会重新登录)" -ForegroundColor Red
-    exit 1
-}
+if (-not $captured) { throw 'No fresh token was captured within 120 seconds' }
+Write-Host 'Token captured and previous proxy settings restored.'

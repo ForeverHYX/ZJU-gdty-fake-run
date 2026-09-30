@@ -3,7 +3,7 @@
 用法: python3 route_img.py <route_id> <points_json_file> [里程km] [时长min]
 依赖: config.json, token.txt, Pillow
 """
-import json, math, random, sys, urllib.request, urllib.parse, uuid, gzip, io, os
+import json, math, random, sys, urllib.request, urllib.parse, uuid, gzip, io, os, tempfile
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(DIR, "config.json")))
@@ -49,8 +49,10 @@ def fetch_tile(tx, ty, zoom):
             continue
     return None
 
-def build_image(points, km_text, dur_text, out="/tmp/route_img.png"):
+def build_image(points, km_text, dur_text, out=None):
     from PIL import Image, ImageDraw, ImageFont
+    if out is None:
+        out = os.path.join(tempfile.gettempdir(), "route_img.png")
     zoom = 17
     proj = [mercator(p["latitude"], p["longitude"], zoom) for p in points]
     xs = [p[0] for p in proj]; ys = [p[1] for p in proj]

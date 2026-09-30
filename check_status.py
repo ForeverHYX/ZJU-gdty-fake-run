@@ -29,7 +29,7 @@ def remaining():
 def dedup():
     tok = load_token()
     if not tok:
-        print("NO"); return
+        print("UNKNOWN"); return
     q = {"club_id": CFG.get("club_id", 0), "platform_source_type": 0, "platform_user_id": CFG["user_id"],
          "platform_language": "zh", "platform_app_brand": CFG["brand"],
          "cursor": "0", "limit": "5", "sports_type": "1"}
@@ -40,11 +40,14 @@ def dedup():
         r = urllib.request.urlopen(req, timeout=20); raw = r.read()
         if raw[:2] == b"\x1f\x8b": raw = gzip.decompress(raw)
         today = datetime.date.today()
+        records = json.loads(raw).get("list")
+        if not isinstance(records, list):
+            raise ValueError("route list response is missing its list")
         hit = any(datetime.date.fromtimestamp(it["start_time"]) == today and it["total_length"] >= 3000
-                  for it in json.loads(raw).get("list", []))
+                  for it in records)
         print("YES" if hit else "NO")
     except Exception:
-        print("NO")   # 查询失败不拦截打卡
+        print("UNKNOWN")
 
 if __name__ == "__main__":
     {"dedup": dedup, "remaining": remaining}[sys.argv[1]]()
