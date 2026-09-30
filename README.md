@@ -34,7 +34,9 @@ POST /v1/route/create_route_image_url -> 挂载轨迹图
 | `route_img.py` | 轨迹图生成（腾讯瓦片底图+蓝线）+ OSS 直传 + 挂载 |
 | `token_grab.py` | mitmproxy 插件，自动截获 auth/login 保存 token |
 | `refresh.sh` | 一键续期：开代理→等小程序打开→抓 token→关代理 |
-| `daily_checkin.sh` | 每日入口：防重→随机延时→必要时续期→提交 |
+| `daily_checkin.sh` / `daily_checkin.ps1` | 每日入口（bash / PowerShell）：防重→随机延时→必要时续期→提交 |
+| `refresh.ps1` | Windows 版 token 续期（双栈代理开关） |
+| `check_status.py` | 跨平台状态查询（防重/ token 剩余），调度脚本共用 |
 | `unpack.js` | wxapkg 解包器（研究协议用） |
 | `route_template.json` | 校内道路折线模板（217 点/3018m，可替换） |
 | `config.example.json` | 配置模板 |
@@ -108,6 +110,42 @@ curl -H "Authorization: Bearer $(cat token.txt)" \
 bash daily_checkin.sh    # 防重→随机延时60~2159s→必要时续期→提交
 ```
 token 续期依赖**用户在 Mac 微信里打开一次小程序**（token 过期后小程序会自动重新登录并被截获）。agent 可在续期时唤起已打开的小程序窗口（AppleScript AXRaise，需辅助功能授权 osascript），或提示用户手动打开。
+
+## Windows 部署
+
+Windows 版入口：`refresh.ps1`（续期）与 `daily_checkin.ps1`（每日打卡），共享 `check_status.py` 做状态查询。
+
+### 环境
+
+```powershell
+pip install mitmproxy pillow
+```
+
+### 证书（管理员，一次性）
+
+先生成 CA（运行一次 refresh.ps1 失败退出即可生成 `mitmca\`），然后：
+```powershell
+certutil -addstore -f ROOT mitmca\mitmproxy-ca-cert.cer
+```
+
+### 抓首次 token / 续期
+
+```powershell
+powershell -ExecutionPolicy Bypass -File refresh.ps1
+```
+脚本会开双栈代理（WinINET 注册表 + winhttp），提示时**在 Windows 微信打开一次企业咕咚小程序**，捕获后自动关代理。
+
+### 每日自动化（任务计划程序）
+
+```powershell
+schtasks /create /tn "gdty-checkin" /tr "powershell -ExecutionPolicy Bypass -File C:\path\to\daily_checkin.ps1" /sc daily /st 14:00
+```
+
+### Windows 注意事项
+
+1. **待实测项**：Windows 微信的小程序流量是否吃系统代理并信任用户 CA（macOS 版实测均吃；若小程序转圈=代理指到了死端口，先关代理放行）
+2. `forge2.py`/`route_img.py` 跨平台无改动；字体自动探测（雅黑/苹方/系统字体）
+3. 触发时电脑需开机且微信保持登录；续期时需要有人点开一次小程序（或用 UIAutomation 自动化，自行取舍）
 
 ## 反检测红线（重要，违反会被静默丢点或标作弊）
 

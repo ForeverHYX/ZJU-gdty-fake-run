@@ -91,9 +91,16 @@ def build_image(points, km_text, dur_text, out="/tmp/route_img.png"):
     d.line(pts2, fill=(86, 158, 245), width=9, joint="curve")
     d.ellipse([pts2[0][0]-10, pts2[0][1]-10, pts2[0][0]+10, pts2[0][1]+10], fill=(64, 196, 106))
     d.ellipse([pts2[-1][0]-10, pts2[-1][1]-10, pts2[-1][0]+10, pts2[-1][1]+10], fill=(240, 90, 90))
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 40)
-    except Exception:
+    import glob
+    font = None
+    for fp in (["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf"]
+               + glob.glob("/System/Library/Fonts/PingFang.ttc")
+               + glob.glob("/usr/share/fonts/**/*.tt[cf]", recursive=True)):
+        try:
+            font = ImageFont.truetype(fp, 40); break
+        except Exception:
+            continue
+    if font is None:
         font = ImageFont.load_default()
     d.text((30, img.height - 90), f"{km_text} km", fill=(60, 60, 60), font=font)
     d.text((30, img.height - 46), f"{dur_text} min", fill=(120, 120, 120), font=font)

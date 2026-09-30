@@ -151,7 +151,7 @@ def run():
             json.dump([{"latitude": p["latitude"], "longitude": p["longitude"]} for p in all_pts],
                       open(f"/tmp/points_{rid[:8]}.json", "w"))
             try:
-                subprocess.run(["python3", os.path.join(DIR, "route_img.py"), rid,
+                subprocess.run([sys.executable, os.path.join(DIR, "route_img.py"), rid,
                                 f"/tmp/points_{rid[:8]}.json", f"{cum/1000:.2f}", f"{sim/60:.1f}"],
                                timeout=300, capture_output=True)
                 print("[OK] 轨迹图已生成并挂到记录", flush=True)
