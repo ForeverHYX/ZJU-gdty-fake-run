@@ -132,9 +132,10 @@ def run():
             pending = []
         if sim - last_steps >= 45:
             d = sim - last_steps
-            steps += int(d * CADENCE * random.uniform(.94, 1.06))
+            step_delta = int(d * CADENCE * random.uniform(.94, 1.06))
+            steps += step_delta
             call("POST", "/v1/route/create_route_gyroscope_steps",
-                 {"route_id": rid, "type": 6, "cur_steps": steps, "upload_time": int(time.time()), "dur": int(d)})
+                 {"route_id": rid, "type": 6, "cur_steps": step_delta, "upload_time": int(time.time()), "dur": int(d)})
             last_steps = sim
         time.sleep(dt)
     sim = time.time() - wall0; i += 1; cum += 3.0; ts_cursor += random.uniform(3, 6)
