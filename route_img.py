@@ -54,14 +54,24 @@ def build_image(points, km_text, dur_text, out=None):
     if out is None:
         out = os.path.join(tempfile.gettempdir(), "route_img.png")
     zoom = 17
-    proj = [mercator(p["latitude"], p["longitude"], zoom) for p in points]
-    xs = [p[0] for p in proj]; ys = [p[1] for p in proj]
     TW = 256
     W, H = 750, 560
-    cx = (max(xs) + min(xs)) / 2; cy = (max(ys) + min(ys)) / 2
-    span_x = max(xs) - min(xs); span_y = max(ys) - min(ys)
-    tiles_x = max(2, int(span_x * 1.2) + 2); tiles_y = max(2, int(span_y * 1.2) + 2)
-    tx0 = math.floor(cx - tiles_x / 2); ty0 = math.floor(cy - tiles_y / 2)
+    projected = [mercator(p["latitude"], p["longitude"], zoom) for p in points]
+    pixels = [(x * TW, y * TW) for x, y in projected]
+    xs, ys = zip(*pixels)
+    cx = (max(xs) + min(xs)) / 2
+    cy = (max(ys) + min(ys)) / 2
+    pad = 60
+    aspect = W / H
+    width = max(max(xs) - min(xs) + 2 * pad, (max(ys) - min(ys) + 2 * pad) * aspect)
+    height = width / aspect
+    left, right = cx - width / 2, cx + width / 2
+    top, bottom = cy - height / 2, cy + height / 2
+
+    # Fetch every tile intersecting the final crop, including the aspect-ratio padding.
+    tx0, ty0 = math.floor(left / TW), math.floor(top / TW)
+    tiles_x = math.ceil(right / TW) - tx0
+    tiles_y = math.ceil(bottom / TW) - ty0
     canvas = Image.new("RGB", (tiles_x * TW, tiles_y * TW), (233, 233, 231))
     for i in range(tiles_x):
         for j in range(tiles_y):
@@ -73,22 +83,11 @@ def build_image(points, km_text, dur_text, out=None):
                     canvas.paste(tile, (i * TW, j * TW))
                 except Exception:
                     pass
-    def to_canvas(p):
-        return ((p[0] - tx0) * TW, (p[1] - ty0) * TW)
-    cp = [to_canvas(p) for p in proj]
-    cxs = [p[0] for p in cp]; cys = [p[1] for p in cp]
-    pad = 60
-    left = max(0, min(cxs) - pad); right = min(canvas.width, max(cxs) + pad)
-    top = max(0, min(cys) - pad); bottom = min(canvas.height, max(cys) + pad)
-    aspect = W / H
-    w = right - left; h = bottom - top
-    if w / h < aspect:
-        want = aspect * h; left = max(0, (left + right) / 2 - want / 2); right = left + want
-    else:
-        want = w / aspect; top = max(0, (top + bottom) / 2 - want / 2); bottom = top + want
-    img = canvas.crop((int(left), int(top), int(right), int(bottom))).resize((W * 2, H * 2), Image.LANCZOS)
+    origin_x, origin_y = tx0 * TW, ty0 * TW
+    crop = (left - origin_x, top - origin_y, right - origin_x, bottom - origin_y)
+    img = canvas.resize((W * 2, H * 2), Image.LANCZOS, box=crop)
     d = ImageDraw.Draw(img)
-    pts2 = [((x - left) * (W * 2 / (right - left)), (y - top) * (H * 2 / (bottom - top))) for x, y in cp]
+    pts2 = [((x - left) * (W * 2 / width), (y - top) * (H * 2 / height)) for x, y in pixels]
     d.line(pts2, fill=(255, 255, 255), width=14, joint="curve")
     d.line(pts2, fill=(86, 158, 245), width=9, joint="curve")
     d.ellipse([pts2[0][0]-10, pts2[0][1]-10, pts2[0][0]+10, pts2[0][1]+10], fill=(64, 196, 106))
