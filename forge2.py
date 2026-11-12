@@ -1,13 +1,42 @@
 #!/usr/bin/env python3
 """fakerun 主程序 — 校内道路轨迹伪造提交
-用法: python3 -u forge2.py [--dry]
-依赖: config.json(从 config.example.json 复制填写), token.txt, route_template.json
+用法: python3 -u forge2.py [--dry] [--route ID] [--list-routes]
+依赖: config.json(从 config.example.json 复制填写), route_catalog.json, route_template.json
+正式提交还需要 token.txt。
 """
-import urllib.request, urllib.parse, json, gzip, time, random, math, sys, subprocess, os, tempfile
+import argparse, urllib.request, urllib.parse, json, gzip, time, random, math, sys, subprocess, os, tempfile
 
 DIR = os.path.dirname(os.path.abspath(__file__))
-CFG = json.load(open(os.path.join(DIR, "config.json")))
-TOKEN = open(os.path.join(DIR, "token.txt")).read().strip()
+
+def load_json(filename):
+    with open(os.path.join(DIR, filename), encoding="utf-8") as file:
+        return json.load(file)
+
+try:
+    ROUTES = load_json("route_catalog.json")
+except FileNotFoundError:
+    ROUTES = {"yuquan": {"name": "玉泉原有路线", "template": "route_template.json", "loop": False}}
+
+parser = argparse.ArgumentParser(description="选择并运行路线")
+parser.add_argument("--dry", action="store_true", help="离线预览，不提交记录")
+parser.add_argument("--route", choices=ROUTES, help="选择本次路线")
+parser.add_argument("--list-routes", action="store_true", help="列出可选路线")
+args = parser.parse_args() if __name__ == "__main__" else parser.parse_args([])
+if args.list_routes:
+    for route_id, entry in ROUTES.items():
+        print(f"{route_id:16} {entry['name']}")
+    sys.exit()
+
+CFG = load_json("config.json")
+ROUTE_ID = args.route or CFG.get("route_id", "yuquan")
+if ROUTE_ID not in ROUTES:
+    parser.error(f"未知路线 {ROUTE_ID!r}，请用 --list-routes 查看可选路线")
+ROUTE = ROUTES[ROUTE_ID]
+LOOP = ROUTE["loop"]
+TOKEN = ""
+if not args.dry:
+    with open(os.path.join(DIR, "token.txt"), encoding="utf-8") as token_file:
+        TOKEN = token_file.read().strip()
 UID = CFG["user_id"]
 CLUB_ID = CFG.get("club_id", 0)
 BRAND = CFG["brand"]
@@ -20,7 +49,9 @@ TARGET_M = CFG.get("target_m", 3300)
 BASE_PACE = CFG.get("base_pace", 300)   # 秒/km
 CADENCE = 2.62
 
-POLY = [tuple(p) for p in json.load(open(os.path.join(DIR, "route_template.json")))]
+POLY = ROUTE["points"] if "points" in ROUTE else load_json(ROUTE["template"])
+if len(POLY) < 2 or (LOOP and (len(POLY) < 4 or POLY[0] != POLY[-1])):
+    parser.error(f"路线 {ROUTE_ID!r} 的坐标不完整，绕圈路线必须首尾相同")
 
 def hav(a, b):
     la1, lo1, la2, lo2 = map(math.radians, [a[0], a[1], b[0], b[1]])
@@ -30,9 +61,11 @@ ARCS = [0.0]
 for k in range(len(POLY)-1):
     ARCS.append(ARCS[-1] + hav(POLY[k], POLY[k+1]))
 TOTAL_POLY = ARCS[-1]
+if not math.isfinite(TOTAL_POLY) or TOTAL_POLY <= 0:
+    parser.error(f"路线 {ROUTE_ID!r} 的长度必须大于零")
 
 def at_arc(s):
-    s = max(0.0, min(TOTAL_POLY, s))
+    s = s % TOTAL_POLY if LOOP else max(0.0, min(TOTAL_POLY, s))
     for k in range(len(ARCS)-1):
         if ARCS[k+1] >= s:
             f = (s - ARCS[k]) / (ARCS[k+1] - ARCS[k]) if ARCS[k+1] > ARCS[k] else 0
@@ -41,8 +74,11 @@ def at_arc(s):
     return POLY[-1]
 
 def make_course(target_m):
-    """两种模式: 全程单向+折返尾 / 随机起点往返"""
+    """闭合跑道持续绕圈，普通路线沿用单向加折返或往返。"""
     need = target_m + 40
+    if LOOP:
+        start = random.uniform(0, TOTAL_POLY)
+        return [start, start + need], "闭合跑道绕圈"
     if random.random() < 0.55:
         start = random.uniform(0, 60)
         course, desc = [start, TOTAL_POLY, start + need - TOTAL_POLY], "全程单向+折返尾"
@@ -94,13 +130,13 @@ def dry():
         step_m = 1000.0/pace * dt
         s = w.step(step_m); la, lo = at_arc(s); cum += step_m
         pts.append((la + random.gauss(0, 1.5)/111320, lo + random.gauss(0, 1.5)/85200))
-    print(f"模式: {desc} | {len(pts)}点 {cum:.0f}m 折线总长{TOTAL_POLY:.0f}m")
+    print(f"路线: {ROUTE['name']} | 模式: {desc} | {len(pts)}点 {cum:.0f}m 模板长度{TOTAL_POLY:.0f}m")
     la=[p[0] for p in pts]; lo=[p[1] for p in pts]
     print(f"坐标范围: lat {min(la):.5f}~{max(la):.5f} lon {min(lo):.5f}~{max(lo):.5f}")
 
 def run():
     course, desc = make_course(TARGET_M)
-    print(f"[*] 路线模式: {desc}", flush=True)
+    print(f"[*] 路线: {ROUTE['name']} | 模式: {desc}", flush=True)
     w = Walker(course)
     r = call("POST", "/v1/route/start_route", {"is_in_room": 0, "sports_type": 1, "location": "",
                                                "source": 2, "device_info": DEV})
@@ -173,5 +209,5 @@ def run():
         print("[FAIL] 完成失败; 进行中的路线可用 completes_route is_delete=true 清理后重试", flush=True)
 
 if __name__ == "__main__":
-    if "--dry" in sys.argv: dry()
+    if args.dry: dry()
     else: run()
