@@ -50,6 +50,7 @@ POST /v1/route/create_route_image_url -> 挂载轨迹图
 | `tests/test_step_reporting.py` | 离线回归测试（不需网络/配置/凭据） |
 | `unpack.js` | wxapkg 解包器（研究协议用） |
 | `route_template.json` | 校内道路折线模板（217 点/3018m，可替换） |
+| `route_catalog.json` | 路线库，包含玉泉原路线和紫金港东、西田径场 |
 | `config.example.json` | 配置模板 |
 
 ## Agent 部署流程
@@ -129,9 +130,16 @@ powershell -ExecutionPolicy Bypass -File refresh.ps1
 
 生成配置：`cp config.example.json config.json`（Windows `copy config.example.json config.json`）并填写。
 
-### 第 3 步：路线模板
+### 第 3 步：选择路线
 
-`route_template.json` 是 `[[lat,lon],...]` 折线（总长 ≥3km）。默认为玉泉校区某真实道路环线。获取自己学校的：在 detail 接口 `GET /v1/open/get_user_gps_info/detail?route_id=<任一真实记录>` 响应的 `point_list_view` 里提取坐标即可（该接口有负载均衡抖动，取空了重试几次）。
+```bash
+python forge2.py --list-routes
+python forge2.py --dry --route zijingang-east
+```
+
+把 `config.json` 的 `route_id` 设为 `yuquan`、`zijingang-east` 或 `zijingang-west`，可选择默认路线。省略时默认 `yuquan`，命令行 `--route` 可以覆盖本次选择。两座田径场会循环绕圈，直到达到 `target_m`。
+
+`route_catalog.json` 记录路线名称、是否绕圈、坐标系和坐标来源。三条路线统一使用 GCJ-02。玉泉条目读取已与腾讯底图对齐的原有 `route_template.json`。东场采用 OpenStreetMap 标注的闭合步道，西场用 OpenStreetMap 的场地边界定位并按 400 米建模，两条路线的坐标已从 WGS-84 转为 GCJ-02。地图数据 © [OpenStreetMap 贡献者](https://www.openstreetmap.org/copyright)。自定义路线使用 GCJ-02 的 `[[lat, lon], ...]` 坐标，绕圈路线要让首尾坐标相同。
 
 ### 第 4 步：试跑与验收
 
